@@ -13,7 +13,7 @@ def print_with_time(message):
 def send_serverchan(title, content):
     """使用Server酱发送微信推送"""
     SERVERCHAN_SENDKEY = os.getenv("SERVERCHAN_SENDKEY", "")
-    SERVERCHAN_SENDKEY = SCT127855TbrC9M4LmSmrgv3RLyGTk9Pwr
+    SERVERCHAN_SENDKEY = "SCT127855TbrC9M4LmSmrgv3RLyGTk9Pwr"
     
     if not SERVERCHAN_SENDKEY:
         print_with_time("⚠️ 未配置Server酱SendKey，跳过消息推送")
