@@ -9,6 +9,37 @@ def print_with_time(message):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{current_time}] {message}")
 
+# ========== Server酱推送配置 ==========
+def send_serverchan(title, content):
+    """使用Server酱发送微信推送"""
+    SERVERCHAN_SENDKEY = os.getenv("SERVERCHAN_SENDKEY", "")
+    
+    if not SERVERCHAN_SENDKEY:
+        print_with_time("⚠️ 未配置Server酱SendKey，跳过消息推送")
+        return False
+        
+    url = f"https://sctapi.ftqq.com/{SERVERCHAN_SENDKEY}.send"
+    
+    data = {
+        "title": title,
+        "desp": content
+    }
+    
+    try:
+        response = requests.post(url, data=data, timeout=10)
+        result = response.json()
+        
+        if result.get("code") == 0:
+            print_with_time("✅ Server酱推送成功")
+            return True
+        else:
+            print_with_time(f"❌ Server酱推送失败：{result.get('message', '未知错误')}")
+            return False
+            
+    except Exception as e:
+        print_with_time(f"❌ Server酱推送异常：{str(e)}")
+        return False
+
 def login_and_get_cookie():
     """登录 SSPanel 并获取 Cookie"""
     email = os.getenv('IKUUU_EMAIL')
@@ -94,16 +125,17 @@ def checkin(cookie):
         
         if data.get('ret') == 1:
             print_with_time(f"✅ 签到成功: {data['msg']}")
-            return True
+            return True, data['msg']
         elif "已经签到" in data.get('msg', ''):
             print_with_time(f"ℹ️ 今日已签到: {data['msg']}")
-            return True
+            return True, data['msg']
         else:
             print_with_time(f"❌ 签到失败: {data['msg']}")
-            return False
+            return False, data['msg']
     except Exception as e:
-        print_with_time(f"❌ 签到请求失败: {str(e)}")
-        return False
+        error_msg = f"签到请求失败: {str(e)}"
+        print_with_time(f"❌ {error_msg}")
+        return False, error_msg
 
 def get_user_traffic(cookie):
     headers = {
@@ -121,8 +153,11 @@ def get_user_traffic(cookie):
         # 查找剩余流量信息
         traffic_cards = soup.find_all('div', class_='card-statistic-2')
         
-        print_with_time("📊 流量使用情况:")
-        print("=" * 50)
+        traffic_info = "📊 流量使用情况:\n"
+        traffic_info += "=" * 50 + "\n"
+        
+        remaining_traffic = "未知"
+        today_used = "未知"
         
         for card in traffic_cards:
             header = card.find('h4')
@@ -131,7 +166,7 @@ def get_user_traffic(cookie):
                 body = card.find('div', class_='card-body')
                 if body:
                     remaining_traffic = re.sub(r'\s+', ' ', body.get_text(strip=True))
-                    print(f"📈 剩余流量: {remaining_traffic}")
+                    traffic_info += f"📈 剩余流量: {remaining_traffic}\n"
                 
                 # 提取今日已用流量
                 stats = card.find('div', class_='card-stats-title')
@@ -141,15 +176,29 @@ def get_user_traffic(cookie):
                     match = re.search(r':\s*(.+)', today_used_text)
                     if match:
                         today_used = match.group(1).strip()
-                        print(f"📊 今日已用: {today_used}")
+                        traffic_info += f"📊 今日已用: {today_used}\n"
                     else:
-                        print(f"📊 今日使用情况: {today_used_text}")
+                        today_used = today_used_text
+                        traffic_info += f"📊 今日使用情况: {today_used}\n"
         
-        print("=" * 50)
-        return soup
+        traffic_info += "=" * 50
+        
+        # 打印到控制台
+        print_with_time(traffic_info)
+        
+        return {
+            'remaining_traffic': remaining_traffic,
+            'today_used': today_used,
+            'full_info': traffic_info
+        }
     except Exception as e:
-        print_with_time(f"❌ 获取流量信息失败: {str(e)}")
-        return None
+        error_msg = f"获取流量信息失败: {str(e)}"
+        print_with_time(f"❌ {error_msg}")
+        return {
+            'remaining_traffic': '获取失败',
+            'today_used': '获取失败',
+            'full_info': error_msg
+        }
 
 if __name__ == "__main__":
     print("=" * 60)
@@ -160,14 +209,41 @@ if __name__ == "__main__":
     cookie_data = login_and_get_cookie()
     
     if not cookie_data:
-        print_with_time("❌ 程序终止")
+        error_msg = "❌ 登录失败，程序终止"
+        print_with_time(error_msg)
+        # 登录失败时推送
+        send_serverchan("❌ iKuuu 登录失败", error_msg)
         exit(1)
     
-    # 执行签到
-    checkin(cookie_data)
+    # 执行签到（现在接收返回值）
+    checkin_success, checkin_msg = checkin(cookie_data)
     
     # 获取流量信息
-    get_user_traffic(cookie_data)
+    traffic_data = get_user_traffic(cookie_data)
+    
+    # 构建推送消息
+    email = os.getenv('IKUUU_EMAIL', '未知账号')
+    masked_email = f"{email[:3]}***{email.split('@')[1]}" if '@' in email else email
+    
+    push_title = "✅ iKuuu 签到成功" if checkin_success else "❌ iKuuu 签到失败"
+    push_content = f"""
+## 📧 账号信息
+- **账号**: {masked_email}
+- **签到时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+## 📝 签到结果
+- **状态**: {'✅ 成功' if checkin_success else '❌ 失败'}
+- **详情**: {checkin_msg}
+
+## 📊 流量信息
+{traffic_data['full_info']}
+
+---
+> 自动签到程序执行完成
+"""
+    
+    # 发送推送
+    send_serverchan(push_title, push_content)
     
     print("=" * 60)
     print_with_time("✨ 程序执行完成")
